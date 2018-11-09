@@ -1,0 +1,12 @@
+# depslib dependency file v1.0
+1541784764 source:h:\my cloud\google drive\0drive\my projects\tasks\filehandlers\filechangecatcher\main.cpp
+	<iostream>
+	<windows.h>
+	<Winbase.h>
+	<stdlib.h>
+	<stdio.h>
+	<tchar.h>
+	<pthread.h>
+	<fstream>
+	<string.h>
+

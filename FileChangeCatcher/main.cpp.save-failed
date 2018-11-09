@@ -1,0 +1,375 @@
+#include <iostream>
+#include <windows.h>
+#include <Winbase.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <tchar.h>
+#include <pthread.h>
+#include <fstream>
+
+using namespace std;
+
+#define MAX_DIRS    25
+#define MAX_FILES   255
+#define MAX_BUFFER  4096
+#define BUFSIZE 4096
+#define PIPE_TIMEOUT 1000
+
+extern "C" {
+    WINBASEAPI BOOL WINAPI
+    ReadDirectoryChangesW( HANDLE hDirectory, LPVOID lpBuffer,
+                           DWORD nBufferLength, BOOL bWatchSubtree,
+                           DWORD dwNotifyFilter,
+                           LPDWORD lpBytesReturned,
+                           LPOVERLAPPED lpOverlapped,
+                           LPOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine);
+}
+
+typedef struct _THREAD_INFO
+{
+    int  thread_id;
+    LPCSTR path;
+    HANDLE *hPipe;//ofstream *f;
+} THREAD_INFO;
+
+typedef struct _DIRECTORY_INFO
+{
+    HANDLE hDir;
+    TCHAR lpszDirName[MAX_PATH];
+    CHAR lpBuffer[MAX_BUFFER];
+    DWORD dwBufLength;
+    OVERLAPPED Overlapped;
+} DIRECTORY_INFO, *PDIRECTORY_INFO, *LPDIRECTORY_INFO;
+
+DIRECTORY_INFO DirInfo[MAX_DIRS];
+TCHAR FileList[MAX_FILES*MAX_PATH];
+DWORD numDirs;
+
+void WatchDirectory(THREAD_INFO* mythread)
+{
+    char buf[2048];
+    DWORD nRet;
+    BOOL result=TRUE;
+    char filename[MAX_PATH];
+    DirInfo[0].hDir = CreateFileA(mythread->path, GENERIC_READ|FILE_LIST_DIRECTORY,
+                                  FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+                                  NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OVERLAPPED,
+                                  NULL);
+
+    if(DirInfo[0].hDir == INVALID_HANDLE_VALUE)
+    {
+        return;
+    }
+
+    lstrcpyA ( DirInfo[0].lpszDirName, mythread->path);
+    OVERLAPPED PollingOverlap;
+
+    FILE_NOTIFY_INFORMATION* pNotify;
+    int offset;
+    PollingOverlap.OffsetHigh = 0;
+    PollingOverlap.hEvent = CreateEvent(NULL,TRUE,FALSE,NULL);
+    while(result)
+    {
+        result = ReadDirectoryChangesW(
+                     DirInfo[0].hDir,
+                     &buf,
+                     sizeof(buf),
+                     TRUE,
+                     FILE_NOTIFY_CHANGE_FILE_NAME |
+                     FILE_NOTIFY_CHANGE_DIR_NAME |
+                     FILE_NOTIFY_CHANGE_SIZE,
+                     &nRet,
+                     &PollingOverlap,
+                     NULL);
+
+        WaitForSingleObject(PollingOverlap.hEvent,INFINITE);
+        offset = 0;
+        int rename = 0;
+        char oldName[260];
+        char newName[260];
+        do
+        {
+            pNotify = (FILE_NOTIFY_INFORMATION*)((char*)buf + offset);
+            strcpy(filename, "");
+            int filenamelen = WideCharToMultiByte(CP_ACP, 0, pNotify->FileName, pNotify->FileNameLength/2, filename, sizeof(filename), NULL, NULL);
+            filename[pNotify->FileNameLength/2] = '\0';
+            switch(pNotify->Action)
+            {
+            case FILE_ACTION_ADDED:
+                //*f<<"ADD: \t"<<filename<<"\n";
+                break;
+            case FILE_ACTION_REMOVED:
+                //*f<<"REMOVED: \t"<<filename<<"\n";
+                break;
+            case FILE_ACTION_MODIFIED:
+                //*f<<"MODIFIED: \t"<<filename<<"\n";
+                break;
+            case FILE_ACTION_RENAMED_OLD_NAME:
+                //*f<<"%RENAMED_FROM: \t"<<filename<<"\n";
+                break;
+            case FILE_ACTION_RENAMED_NEW_NAME:
+                //*f<<"%RENAMED_TO: \t"<<filename<<"\n";
+                break;
+            default:
+                //*f<<"ERROR\n";
+                break;
+            }
+            offset += pNotify->NextEntryOffset;
+        }
+        while(pNotify->NextEntryOffset);
+    }
+    CloseHandle( DirInfo[0].hDir );
+}
+
+void *CatchDir(void *threadarg)
+{
+    THREAD_INFO *my_data;
+    my_data = (THREAD_INFO *) threadarg;
+    cout << "Thread ID : " << my_data->thread_id << "-- Dir : " << my_data->path << endl;
+    WatchDirectory(my_data);
+    pthread_exit(NULL);
+}
+
+int StartNamedPipeServer()
+{
+   BOOL   fConnected = FALSE;
+   DWORD  dwThreadId = 0;
+   HANDLE hPipe = INVALID_HANDLE_VALUE, hThread = NULL;
+   LPTSTR lpszPipename = TEXT("\\\\.\\pipe\\mynamedpipe");
+
+   for (;;)
+   {
+      _tprintf( TEXT("Server: Main thread awaiting client connection on %s\n"), lpszPipename);
+        if (hPipe == INVALID_HANDLE_VALUE)
+      {
+          _tprintf(TEXT("CreateNamedPipe failed, GLE=%d.\n"), GetLastError());
+          return -1;
+      }
+
+
+   }
+
+
+    LPTSTR lpszPipename = "\\\\.\\pipe\\qursaanPipe";
+    HANDLE hPipe        = NULL;
+    BOOL flg            = FALSE;
+    //DWORD dwWrite=0,dwRead=0;
+    //char szServerReply[200];
+    //char szClientRequest[200];
+    DWORD cbBytesRead = 0, cbReplyBytes = 0, cbWritten = 0;
+    HANDLE hHeap      = GetProcessHeap();
+    TCHAR* pchRequest = (TCHAR*)HeapAlloc(hHeap, 0, BUFSIZE*sizeof(TCHAR));
+    TCHAR* pchReply   = (TCHAR*)HeapAlloc(hHeap, 0, BUFSIZE*sizeof(TCHAR));
+
+    hPipe = CreateNamedPipe (lpszPipename,
+                             PIPE_ACCESS_DUPLEX,
+                             PIPE_TYPE_MESSAGE |
+                             PIPE_READMODE_MESSAGE |
+                             PIPE_WAIT,
+                             PIPE_UNLIMITED_INSTANCES,
+                             BUFSIZE,
+                             BUFSIZE,
+                             PIPE_TIMEOUT,
+                             NULL);
+
+    if (hPipe == INVALID_HANDLE_VALUE)
+    {
+        printf("CreateFile failed for Named Pipe client\n" );
+        return 0;
+    }
+
+    ConnectNamedPipe(hPipe, NULL);
+
+    if (pchRequest == NULL)
+    {
+        printf( "\nERROR - Pipe Server Failure:\n");
+        printf( "   MainThread got an unexpected NULL heap allocation.\n");
+        printf( "   MainThread exitting.\n");
+        if (pchReply != NULL)
+            HeapFree(hHeap, 0, pchReply);
+        return (DWORD)-1;
+    }
+
+    if (pchReply == NULL)
+    {
+        printf( "\nERROR - Pipe Server Failure:\n");
+        printf( "   MainThread got an unexpected NULL heap allocation.\n");
+        printf( "   MainThread exitting.\n");
+        if (pchRequest != NULL)
+            HeapFree(hHeap, 0, pchRequest);
+        return (DWORD)-1;
+    }
+
+    printf("MainThread created, receiving and processing messages.\n");
+
+    int ti = 0;
+
+    while (1)
+    {
+        if(ti == 0){//send
+            strcpy( pchReply,"#123");
+            cbReplyBytes = strlen(pchReply);//+1)*sizeof(TCHAR);
+            //Write status to Client
+            flg = WriteFile(hPipe, pchReply, cbReplyBytes, &cbWritten, NULL);
+            if (!flg || cbReplyBytes != cbWritten)
+            {
+                printf("Failed write to client\n");
+            }
+            else{
+                ti++;
+                printf("Waiting Client Order...\n");
+            }
+        }
+        else if(ti==1){//receive
+            //printf(".");
+            flg = ReadFile( hPipe,  pchRequest, BUFSIZE*sizeof(TCHAR), &cbBytesRead,NULL);
+            if (!flg || cbBytesRead == 0)
+            {
+                if (GetLastError() == ERROR_BROKEN_PIPE)
+                {
+                    _tprintf(TEXT("MainThread: main client disconnected.\n"), GetLastError());
+                }
+                else
+                {
+                    _tprintf(TEXT("MainThread: Read Request failed, GLE=%d.\n"), GetLastError());
+                }
+                break;
+            }else{
+                pchRequest[cbReplyBytes]='\0';
+            }
+            printf( "Client Request: ");
+            printf("%s", pchRequest );
+            printf("\n");
+            //ti=2;
+        }
+        else if(ti==2)
+        {
+            //GetAnswerToRequest(pchRequest, pchReply, &cbReplyBytes);
+            // Check the outgoing message to make sure it's not too long for the buffer.
+            if (FAILED(strcpy( pchReply, "#678" )))
+            {
+                cbReplyBytes = 0;
+                pchReply[0] = 0;
+                printf("StringCopy failed, no outgoing message.\n");
+            }
+            else
+            {
+                cbReplyBytes = strlen(pchReply);
+                //cbReplyBytes = (lstrlen(pchReply)+1)*sizeof(TCHAR);
+            }
+
+            // Write the reply to the pipe.
+            //flg = WriteFile(hPipe, szServerUpdate, strlen(szServerUpdate), &dwWrite, NULL);
+            flg = WriteFile(hPipe, pchReply, cbReplyBytes, &cbWritten, NULL);
+
+            if (!flg || cbReplyBytes != cbWritten)
+            {
+                 _tprintf(TEXT("MainThread Replay failed.\n"), GetLastError());
+                break;
+            }
+            ti=1;
+        }
+    }
+    //}while( ! flg);
+    FlushFileBuffers(hPipe);
+    DisconnectNamedPipe(hPipe);
+    CloseHandle(hPipe);
+
+    HeapFree(hHeap, 0, pchRequest);
+    HeapFree(hHeap, 0, pchReply);
+
+    printf("Main Thread exitting.\n");
+    //EndServer();
+    //StartServer();
+
+    return 0;
+}
+
+int main ()
+{
+    printf( " _______  __   __  ______    _______  _______  _______  __    _ \n"
+            "|       ||  | |  ||    _ |  |       ||   _   ||   _   ||  |  | |\n"
+            "|   _   ||  | |  ||   | ||  |  _____||  |_|  ||  |_|  ||   |_| |\n"
+            "|  | |  ||  |_|  ||   |_||_ | |_____ |       ||       ||       |\n"
+            "|  |_|  ||       ||    __  ||_____  ||       ||       ||  _    |\n"
+            "|      | |       ||   |  | | _____| ||   _   ||   _   || | |   |\n"
+            "|____||_||_______||___|  |_||_______||__| |__||__| |__||_|  |__|\n\n");
+
+    printf("Starting application\n");
+    printf("Staring Main Server\n");
+
+
+    StartNamedPipeServer();
+
+
+    /*ofstream f1, f2;
+    f1.open("f1.txt");
+    f2.open("f2.txt");
+    pthread_t threads[NUM_THREADS];
+    struct thread_data td[NUM_THREADS];
+    int rc;
+    int i;
+
+    pthread_attr_t attr;
+    void *status;
+
+    // Initialize and set thread joinable
+
+
+    rc = pthread_attr_init(&attr);
+    if (rc == -1)
+    {
+        perror("error in pthread_attr_init");
+        exit(1);
+    }
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+    //for( i = 0; i < NUM_THREADS; i++ ) {
+    i=0;
+    cout <<"main() : creating thread, " <<i<< endl;
+    td[i].thread_id = i;
+    td[i].dir = "C:\\";
+    td[i].f = &f1;
+    rc = pthread_create(&threads[i], &attr, CatchDir, (void *)&td[i]);
+
+    if (rc)
+    {
+        cout << "Error:unable to create thread," << rc << endl;
+        exit(-1);
+    }
+
+    i=1;
+    cout <<"main() : creating thread, " <<i<< endl;
+    td[i].thread_id = i;
+    td[i].dir = "H:\\";
+    td[i].f = &f2;
+    rc = pthread_create(&threads[i], &attr, CatchDir, (void *)&td[i]);
+
+    if (rc)
+    {
+        cout << "Error:unable to create thread," << rc << endl;
+        exit(-1);
+    }
+    //}
+    // free attribute and wait for the other threads
+    pthread_attr_destroy(&attr);
+    for( i = 0; i < NUM_THREADS; i++ )
+    {
+        rc = pthread_join(threads[i], &status);
+        if (rc)
+        {
+            cout << "Error:unable to join," << rc << endl;
+            exit(-1);
+        }
+
+        cout << "Main: completed thread id :" << i ;
+        cout << "  exiting with status :" << status << endl;
+    }
+
+    cout << "Main: program exiting." << endl;
+    pthread_exit(NULL);*/
+
+}
+
+
+

@@ -1,9 +1,0 @@
-MODIFIED: 	Windows\ZAM_Guard.krnl.trace
-MODIFIED: 	Windows\ZAM.krnl.trace
-MODIFIED: 	Windows\Prefetch\CB_CONSOLE_RUNNER.EXE-D45BFEE0.pf
-MODIFIED: 	Windows\Prefetch\CB_CONSOLE_RUNNER.EXE-D45BFEE0.pf
-MODIFIED: 	Windows\Prefetch\FILECHANGECATCHER.EXE-379B296D.pf
-MODIFIED: 	Windows\Prefetch\FILECHANGECATCHER.EXE-379B296D.pf
-ADD: 	Users\Pirate\AppData\Local\Google\Drive\user_default\sync_config.db-wal
-ADD: 	Users\Pirate\AppData\Local\Google\Drive\user_default\sync_config.db-shm
-MODIFIED: 	Users\Pirate\AppData\Local\Google\Drive\user_default\sync_config.db-shm

@@ -2,7 +2,7 @@
 
 
 
-Welcome to the FolderTrackingMultithread wiki!
+Welcome to the Folder Tracking Multithread wiki!
 
 How to Run:
 
